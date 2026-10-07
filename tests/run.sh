@@ -37,7 +37,16 @@ mkdir -p "$DOCROOT"
 cp "$PROJ"/installer/install.php "$PROJ"/installer/lib_*.php "$DOCROOT/"
 cp "$PROJ"/fixture/mysite.zip "$PROJ"/fixture/mysite_dev.sql "$DOCROOT/"
 echo "SENTINEL-40755308-stable" > "$DOCROOT/_sentinel.txt"
-echo "  database dropped and recreated, docroot staged"
+# The real host (GNAME) leaves exactly this in the web root on a new account,
+# and index.html is served before index.php. Reproduce it.
+EXPECT_PLACEHOLDER=${EXPECT_PLACEHOLDER:-1}
+if [ "$EXPECT_PLACEHOLDER" = "1" ]; then
+  printf '<!doctype html><title>New account</title><h1>ACCOUNT CREATED</h1>\n' \
+    > "$DOCROOT/index.html"
+  echo "  database dropped and recreated, docroot staged WITH a host placeholder index.html"
+else
+  echo "  database dropped and recreated, docroot staged"
+fi
 
 echo
 echo "== confirm the web server serves THIS docroot =="
@@ -65,4 +74,5 @@ echo
 echo "== assert =="
 DOCROOT="$DOCROOT" BASEURL="http://127.0.0.1:$PORT" REPORT="$HOST/report.json" \
   DBHOST="$DBHOST" DBNAME="$DBNAME" DBUSER="$DBUSER" DBPASS="$DBPASS" \
+  EXPECT_PLACEHOLDER="$EXPECT_PLACEHOLDER" \
   php "$PROJ/tests/e2e.php"

@@ -130,6 +130,7 @@ if (PHP_SAPI === 'cli' && isset($argv) && in_array('--cli', $argv, true)) {
 
     if ($archive) {
         fl_extract_archive($archive, $root, $report);
+        fl_demote_placeholder_index($root, $report);
     } else {
         $report['warnings'][] = 'No archive found, skipping extraction.';
     }
@@ -304,6 +305,7 @@ PHP <?php echo h(PHP_VERSION); ?> on <?php echo h(php_uname('s')); ?></p>
           $report['errors'][] = 'The archive you picked is no longer in this folder.';
       } else {
           fl_extract_archive($archivePath, $root, $report);
+          fl_demote_placeholder_index($root, $report);
       }
   }
 

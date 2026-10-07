@@ -144,6 +144,20 @@ if ($reportPath && is_file($reportPath)) {
         && $r['table_counts']['published_articles'] === 3);
     t('three config files were rewired', count((array)$r['config_changed']) === 3,
         'changed: ' . count((array)$r['config_changed']));
+
+    // The host leaves an index.html in the web root when it creates the
+    // account, and index.html is served before index.php.
+    if (getenv('EXPECT_PLACEHOLDER')) {
+        t('the host placeholder index.html was renamed out of the way',
+            isset($r['placeholder_demoted'])
+            && $r['placeholder_demoted'] === 'index.html.placeholder.bak',
+            'placeholder_demoted=' . (isset($r['placeholder_demoted'])
+                ? $r['placeholder_demoted'] : 'unset'));
+        t('  and the client is told it happened, not left to find out',
+            count(array_filter((array)$r['notes'], function ($n) {
+                return strpos($n, 'placeholder index.html') !== false;
+            })) === 1);
+    }
     t('SITE_NAME was NOT rewritten',
         !in_array(true, array_map(function ($f) {
             foreach ($f['changes'] as $c) {
@@ -280,6 +294,15 @@ echo "\n-- filesystem --\n";
 
 t('index.php is at the web root, not inside mysite/',
     is_file($docroot . '/index.php'));
+if (getenv('EXPECT_PLACEHOLDER')) {
+    t('the placeholder index.html no longer shadows index.php',
+        !is_file($docroot . '/index.html'));
+    t('  it was kept, not destroyed',
+        is_file($docroot . '/index.html.placeholder.bak'));
+    t('  and the public page is the SITE, not the host placeholder',
+        strpos(req($baseUrl . '/')['body'], 'Welcome to Harbour') !== false
+        && strpos(req($baseUrl . '/')['body'], 'ACCOUNT CREATED') === false);
+}
 t('the wrapper folder was not left behind',
     !is_dir($docroot . '/mysite'));
 t('the admin folder is in place',

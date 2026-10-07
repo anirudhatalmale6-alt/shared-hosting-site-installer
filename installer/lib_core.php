@@ -151,6 +151,7 @@ function fl_extract_archive($path, $dest, &$report)
         }
         $written = 0;
         $skipped = array();
+        $extractedNames = array();
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $name = $names[$i];
             $rel = str_replace('\\', '/', $name);
@@ -192,9 +193,11 @@ function fl_extract_archive($path, $dest, &$report)
             fclose($in);
             fclose($out);
             $written++;
+            $extractedNames[] = $rel;
         }
         $zip->close();
         $report['extracted'] = $written;
+        $report['extracted_names'] = $extractedNames;
         if ($skipped) {
             $report['warnings'][] = 'Skipped ' . count($skipped)
                 . ' archive entries whose paths pointed outside the web root.';
@@ -275,6 +278,60 @@ function fl_rmtree($dir)
         fl_rmtree($dir . '/' . $i);
     }
     @rmdir($dir);
+}
+
+/**
+ * Move the host's placeholder index.html out of the way.
+ *
+ * Shared hosting drops an `index.html` into the web root when the account is
+ * created, and Apache/LiteSpeed almost always list `index.html` BEFORE
+ * `index.php` in DirectoryIndex. So a perfectly installed PHP site still
+ * shows the host's placeholder at the root, and nothing anywhere reports an
+ * error: it is a 200, with the wrong page.
+ *
+ * Only ever touches an index.html that the archive did NOT bring, so a site
+ * whose real home page is static is left alone.
+ *
+ * @param string $root
+ * @param array  $report
+ * @return array $report
+ */
+function fl_demote_placeholder_index($root, &$report)
+{
+    $html = $root . '/index.html';
+    $php = $root . '/index.php';
+    if (!is_file($html) || !is_file($php)) {
+        return $report;
+    }
+
+    // If the archive shipped the index.html, it is the site's own page.
+    $fromArchive = isset($report['extracted_names']) ? $report['extracted_names'] : array();
+    foreach ($fromArchive as $n) {
+        if (strtolower($n) === 'index.html') {
+            $report['notes'][] = 'Both index.html and index.php are at the web root and BOTH came '
+                . 'from your archive. I left them as they are, but the server will serve '
+                . 'index.html first, so tell me if the home page should be the PHP one.';
+            return $report;
+        }
+    }
+
+    $to = $root . '/index.html.placeholder.bak';
+    $i = 2;
+    while (file_exists($to)) {
+        $to = $root . '/index.html.placeholder' . $i . '.bak';
+        $i++;
+    }
+    if (@rename($html, $to)) {
+        $report['notes'][] = 'Your host had left a placeholder index.html in the web root. The '
+            . 'server loads index.html before index.php, so it would have kept showing that '
+            . 'instead of your site. I renamed it to ' . basename($to) . ' rather than deleting it.';
+        $report['placeholder_demoted'] = basename($to);
+    } else {
+        $report['warnings'][] = 'There is a placeholder index.html in the web root and I could not '
+            . 'rename it. The server loads index.html before index.php, so please delete or rename '
+            . 'index.html in the file manager, otherwise the old placeholder keeps showing.';
+    }
+    return $report;
 }
 
 /* ---------------------------------------------------------------- database */
@@ -830,6 +887,18 @@ function fl_selfcheck($root, $creds, $baseUrl, &$report)
     }
     $checks[] = array('Index file at the web root', $hasIndex ? 'present'
         : 'missing, the root will 403 or show a file listing', $hasIndex ? 'pass' : 'fail');
+
+    // index.html winning over index.php is a 200 showing the wrong page, so
+    // it has to be a check in its own right, not a footnote.
+    if (is_file($root . '/index.html') && is_file($root . '/index.php')) {
+        $checks[] = array('Only one index at the web root',
+            'both index.html and index.php are here, and the server serves index.html first',
+            'warn');
+    } elseif (isset($report['placeholder_demoted'])) {
+        $checks[] = array('Only one index at the web root',
+            'the host placeholder was renamed to ' . $report['placeholder_demoted']
+            . ', so index.php is the home page', 'pass');
+    }
 
     $report['checks'] = $checks;
     return $report;
