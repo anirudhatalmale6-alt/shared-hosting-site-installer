@@ -1,2 +1,10 @@
 dist/
 fixture/
+
+# Client attachments must never reach a public repo.
+*.jpg
+*.jpeg
+*.png
+*.pdf
+*.zip
+*.sql
