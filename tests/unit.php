@@ -242,6 +242,74 @@ t('a Windows absolute entry is rejected', fl_entry_is_safe('C:/windows/x'), fals
 t('a normal entry is accepted', fl_entry_is_safe('admin/index.php'), true);
 t('a dotfile entry is accepted', fl_entry_is_safe('.htaccess'), true);
 
+echo "\n-- finding a dump a panel would not let you upload as .sql --\n";
+
+$tmp = sys_get_temp_dir() . '/fl_sniff_' . getmypid();
+@mkdir($tmp, 0755, true);
+$dump = "-- MySQL dump 10.13\nDROP TABLE IF EXISTS `a`;\n"
+      . "CREATE TABLE `a` (`id` int) ENGINE=InnoDB;\nINSERT INTO `a` VALUES (1);\n";
+
+file_put_contents($tmp . '/db.txt', $dump);
+t('a dump renamed to .txt is recognised by content',
+    fl_looks_like_sql_dump($tmp . '/db.txt'), true);
+file_put_contents($tmp . '/database', $dump);
+t('a dump with NO extension is recognised',
+    fl_looks_like_sql_dump($tmp . '/database'), true);
+file_put_contents($tmp . '/backup.bak', $dump);
+t('a dump renamed to .bak is recognised', fl_looks_like_sql_dump($tmp . '/backup.bak'), true);
+
+// Things that must NOT be imported into the client's database.
+file_put_contents($tmp . '/page.php', "<?php\n// CREATE TABLE is mentioned here\n\$x = 'INSERT INTO';\n");
+t('a PHP file mentioning SQL is NOT a dump', fl_looks_like_sql_dump($tmp . '/page.php'), false);
+file_put_contents($tmp . '/page.html', "<!doctype html><p>CREATE TABLE, INSERT INTO</p>");
+t('an HTML file mentioning SQL is NOT a dump', fl_looks_like_sql_dump($tmp . '/page.html'), false);
+file_put_contents($tmp . '/notes.txt', "Remember to INSERT INTO the form\n");
+t('one stray marker is not enough', fl_looks_like_sql_dump($tmp . '/notes.txt'), false);
+file_put_contents($tmp . '/binary.dat', "\x00\x01CREATE TABLE INSERT INTO\x00");
+t('a binary file is NOT a dump', fl_looks_like_sql_dump($tmp . '/binary.dat'), false);
+file_put_contents($tmp . '/empty.txt', '');
+t('an empty file is NOT a dump', fl_looks_like_sql_dump($tmp . '/empty.txt'), false);
+file_put_contents($tmp . '/conf.json', '{"sql":"CREATE TABLE x","q":"INSERT INTO y"}');
+t('a JSON file is NOT a dump', fl_looks_like_sql_dump($tmp . '/conf.json'), false);
+
+// A zip holding only SQL is a dump; a zip holding the site is an archive.
+$z = new ZipArchive();
+$z->open($tmp . '/dbonly.zip', ZipArchive::CREATE | ZipArchive::OVERWRITE);
+$z->addFromString('mysite_dev.sql', $dump);
+$z->close();
+t('a zip containing only .sql counts as the dump',
+    fl_zip_is_only_sql($tmp . '/dbonly.zip'), true);
+
+$z = new ZipArchive();
+$z->open($tmp . '/site.zip', ZipArchive::CREATE | ZipArchive::OVERWRITE);
+$z->addFromString('index.php', '<?php echo 1;');
+$z->addFromString('dump.sql', $dump);
+$z->close();
+t('a zip with the site AND a dump is still the site archive',
+    fl_zip_is_only_sql($tmp . '/site.zip'), false);
+
+// And the whole discovery step, over a folder laid out the awkward way.
+$found = fl_find_inputs($tmp);
+$dumpNames = array();
+foreach ($found['dumps'] as $d) {
+    $dumpNames[] = $d['name'];
+}
+$archiveNames = array();
+foreach ($found['archives'] as $a) {
+    $archiveNames[] = $a['name'];
+}
+sort($dumpNames);
+sort($archiveNames);
+t('discovery finds every disguised dump',
+    $dumpNames, array('backup.bak', 'database', 'db.txt', 'dbonly.zip'));
+t('discovery still sees the site zip as the archive',
+    $archiveNames, array('site.zip'));
+
+foreach (glob($tmp . '/*') as $f) {
+    @unlink($f);
+}
+@rmdir($tmp);
+
 echo "\n-- helpers --\n";
 
 t('args split on top level commas only',

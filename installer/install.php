@@ -616,7 +616,9 @@ PHP <?php echo h(PHP_VERSION); ?> on <?php echo h(php_uname('s')); ?></p>
       <?php endforeach; ?>
       <?php foreach ($inputs['dumps'] as $d): ?>
         <tr><td class="mono"><?php echo h($d['name']); ?></td>
-            <td><?php echo h(fl_human_bytes($d['size'])); ?></td><td>database dump</td></tr>
+            <td><?php echo h(fl_human_bytes($d['size'])); ?></td>
+            <td>database dump<?php echo !empty($d['sniffed'])
+                ? ' <span class="hint">(recognised by its contents, not its name)</span>' : ''; ?></td></tr>
       <?php endforeach; ?>
     </table></div>
     <p class="hint" style="margin-top:12px">Web root here is

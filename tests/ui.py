@@ -68,8 +68,11 @@ with sync_playwright() as p:
     page.wait_for_load_state("domcontentloaded")
     body = page.inner_text("body")
     t("the right key gets in", page.locator("#dbname").count() == 1, body[:200])
+    # The dump's filename is a variable: a panel that refuses .sql uploads
+    # forces the client to rename or zip it, so the test must not assume.
+    dump_name = os.environ.get("DUMP_NAME", "mysite_dev.sql")
     t("the site archive was detected", "mysite.zip" in body)
-    t("the dump was detected", "mysite_dev.sql" in body)
+    t(f"the dump was detected as {dump_name}", dump_name in body, body[:300])
     t("it reads mysite.zip as the site archive", "site archive" in body)
     t("it reads the .sql as the database dump", "database dump" in body)
     page.screenshot(path=str(SHOTS / "02-preflight.png"))

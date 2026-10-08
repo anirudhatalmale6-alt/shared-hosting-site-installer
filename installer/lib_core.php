@@ -31,18 +31,124 @@ function fl_find_inputs($dir)
             continue;
         }
         $lower = strtolower($f);
+
+        // Never treat the installer's own files as input.
+        if (in_array($f, array('install.php', 'lib_sql.php', 'lib_config.php',
+                               'lib_core.php', 'install-key.txt'), true)) {
+            continue;
+        }
+
         if (preg_match('/\.sql$/', $lower) || preg_match('/\.sql\.gz$/', $lower)
             || preg_match('/\.sql\.zip$/', $lower) || preg_match('/\.dump$/', $lower)) {
             $dumps[] = array('name' => $f, 'path' => $full, 'size' => filesize($full));
             continue;
         }
+
         if (preg_match('/\.(zip|tar\.gz|tgz|tar)$/', $lower)) {
-            $archives[] = array('name' => $f, 'path' => $full, 'size' => filesize($full));
+            // A zip holding only SQL is a dump someone zipped to get it past
+            // an upload filter, not a site archive.
+            if (fl_zip_is_only_sql($full)) {
+                $dumps[] = array('name' => $f, 'path' => $full, 'size' => filesize($full));
+            } else {
+                $archives[] = array('name' => $f, 'path' => $full, 'size' => filesize($full));
+            }
+            continue;
+        }
+
+        // Last resort: a control panel that refuses .sql uploads pushes
+        // people to rename the file (dump.txt, db.bak, database). Look at
+        // what is inside instead of trusting the extension.
+        if (fl_looks_like_sql_dump($full)) {
+            $dumps[] = array('name' => $f, 'path' => $full, 'size' => filesize($full),
+                             'sniffed' => true);
         }
     }
     usort($archives, 'fl_cmp_size_desc');
     usort($dumps, 'fl_cmp_size_desc');
     return array('archives' => $archives, 'dumps' => $dumps);
+}
+
+/**
+ * Does this file contain a SQL dump, whatever it happens to be called?
+ *
+ * Needed because a hosting panel can refuse a .sql upload outright, and the
+ * only way the client gets the file onto the server is by renaming it.
+ * Reads the head of the file only, so a large dump costs nothing here.
+ *
+ * @param string $path
+ * @return bool
+ */
+function fl_looks_like_sql_dump($path)
+{
+    $size = @filesize($path);
+    if ($size === false || $size < 24 || $size > 2147483647) {
+        return false;
+    }
+    $fh = @fopen($path, 'rb');
+    if (!$fh) {
+        return false;
+    }
+    $head = (string)fread($fh, 65536);
+    fclose($fh);
+
+    if ($head === '') {
+        return false;
+    }
+    // Reject anything binary; a dump is text.
+    if (strpos($head, "\0") !== false) {
+        return false;
+    }
+    // Reject source files that merely mention SQL.
+    if (preg_match('/^\s*(<\?php|<!doctype|<html|\{|\[)/i', ltrim($head))) {
+        return false;
+    }
+
+    $markers = 0;
+    foreach (array('CREATE TABLE', 'INSERT INTO', 'DROP TABLE', 'MySQL dump',
+                   'ENGINE=', 'LOCK TABLES', 'CREATE DATABASE', 'ALTER TABLE') as $m) {
+        if (stripos($head, $m) !== false) {
+            $markers++;
+        }
+    }
+    // Two independent markers, so a stray "INSERT INTO" in a text file is
+    // not enough to get a file imported into the client's database.
+    return $markers >= 2;
+}
+
+/**
+ * Is this zip just a SQL dump in a wrapper, rather than the site?
+ *
+ * @param string $path
+ * @return bool
+ */
+function fl_zip_is_only_sql($path)
+{
+    if (!class_exists('ZipArchive')) {
+        return false;
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        return false;
+    }
+    $sql = 0;
+    $other = 0;
+    for ($i = 0; $i < $zip->numFiles; $i++) {
+        $n = $zip->getNameIndex($i);
+        if ($n === false || substr($n, -1) === '/') {
+            continue;
+        }
+        $base = basename($n);
+        if ($base === '' || strpos($n, '__MACOSX') === 0 || $base === '.DS_Store') {
+            continue;
+        }
+        if (preg_match('/\.sql$/i', $n)) {
+            $sql++;
+        } else {
+            $other++;
+        }
+    }
+    $zip->close();
+    return $sql > 0 && $other === 0;
 }
 
 function fl_cmp_size_desc($a, $b)
